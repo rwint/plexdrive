@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
+
+	"io"
 
 	. "github.com/claudetech/loggo/default"
 	"golang.org/x/oauth2"
@@ -257,9 +260,61 @@ func (d *Drive) GetObjectByParentAndName(parent, name string) (*APIObject, error
 }
 
 // Open a file
-func (d *Drive) Open(object *APIObject) (*Buffer, error) {
+func (d *Drive) Open(object *APIObject, offset int64) (io.ReadCloser, error) {
 	nativeClient := d.getNativeClient()
-	return GetBufferInstance(nativeClient, object)
+
+	req, err := http.NewRequest("GET", object.DownloadURL, nil)
+	if nil != err {
+		Log.Debugf("%v", err)
+		return nil, fmt.Errorf("Could not create request object %v (%v) from API", object.ObjectID, object.Name)
+	}
+
+	req.Header.Add("Range", fmt.Sprintf("bytes=%v-", offset))
+
+	Log.Tracef("Sending HTTP Request %v", req)
+	res, err := nativeClient.Do(req)
+	if nil != err {
+		Log.Debugf("%v", err)
+		return nil, fmt.Errorf("Could not request object %v (%v) from API", object.ObjectID, object.Name)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
+		// if res.StatusCode != 403 {
+		// 	Log.Debugf("Request\n----------\n%v\n----------\n", req)
+		// 	Log.Debugf("Response\n----------\n%v\n----------\n", res)
+		// 	return nil, fmt.Errorf("Wrong status code %v", res.StatusCode)
+		// }
+
+		// // throttle requests
+		// if delay > 8 {
+		// 	return nil, fmt.Errorf("Maximum throttle interval has been reached")
+		// }
+		bytes, err := ioutil.ReadAll(res.Body)
+		if nil != err {
+			Log.Debugf("%v", err)
+			return nil, fmt.Errorf("Could not read body of 403 error")
+		}
+		body := string(bytes)
+		// if strings.Contains(body, "dailyLimitExceeded") ||
+		// 	strings.Contains(body, "userRateLimitExceeded") ||
+		// 	strings.Contains(body, "rateLimitExceeded") ||
+		// 	strings.Contains(body, "backendError") {
+		// 	if 0 == delay {
+		// 		delay = 1
+		// 	} else {
+		// 		delay = delay * 2
+		// 	}
+		// 	return b.ReadBytes(start, size, true, delay)
+		// }
+
+		// return an error if other 403 error occurred
+		Log.Debugf("%v", body)
+		return nil, fmt.Errorf("Could not read object %v (%v) / StatusCode: %v",
+			object.ObjectID, object.Name, res.StatusCode)
+	}
+
+	return res.Body, nil
 }
 
 // Remove removes file from Google Drive

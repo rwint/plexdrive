@@ -9,6 +9,8 @@ import (
 
 	"strconv"
 
+	"math/rand"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	. "github.com/claudetech/loggo/default"
@@ -208,45 +210,6 @@ func (o *Object) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	}, nil
 }
 
-// Open opens a file for reading
-func (o *Object) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	if req.Dir {
-		return o, nil
-	}
-
-	buffer, err := o.client.Open(o.object)
-	if nil != err {
-		Log.Warningf("%v", err)
-		return o, fuse.ENOENT
-	}
-	o.buffer = buffer
-
-	return o, nil
-}
-
-// Release a stream
-func (o *Object) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	if nil != o.buffer {
-		if err := o.buffer.Close(); nil != err {
-			Log.Debugf("%v", err)
-			Log.Warningf("Could not close buffer stream")
-		}
-	}
-	return nil
-}
-
-// Read reads some bytes or the whole file
-func (o *Object) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	buf, err := o.buffer.ReadBytes(req.Offset, int64(req.Size), false, 0)
-	if nil != err {
-		Log.Warningf("%v", err)
-		return fuse.EIO
-	}
-
-	resp.Data = buf[:]
-	return nil
-}
-
 // Remove deletes an element
 func (o *Object) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	obj, err := o.client.GetObjectByParentAndName(o.object.ObjectID, req.Name)
@@ -261,5 +224,54 @@ func (o *Object) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 		return fuse.EIO
 	}
 
+	return nil
+}
+
+// ReadStream contains the information about a stream
+type ReadStream struct {
+	id     string
+	buffer *Buffer
+}
+
+// Open opens a file for reading
+func (o *Object) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	if req.Dir {
+		return o, nil
+	}
+
+	id := fmt.Sprintf("%v:%v", o.object.ObjectID, rand.Int63n(10000))
+	Log.Tracef("Opening stream %v", id)
+
+	buffer, err := NewBuffer(o.client, o.object)
+	if nil != err {
+		Log.Warningf("%v", err)
+		return nil, fuse.EIO
+	}
+
+	return &ReadStream{
+		id:     id,
+		buffer: buffer,
+	}, nil
+}
+
+// Release a stream
+func (s *ReadStream) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	Log.Tracef("Closing stream %v", s.id)
+	if err := s.buffer.Close(); nil != err {
+		Log.Warningf("%v", err)
+		return fuse.EIO
+	}
+	return nil
+}
+
+// Read reads some bytes or the whole file
+func (s *ReadStream) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	bytes, err := s.buffer.Read(req.Offset, int64(req.Size))
+	if nil != err {
+		Log.Warningf("%v", err)
+		return fuse.EIO
+	}
+
+	resp.Data = bytes[:]
 	return nil
 }
