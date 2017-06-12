@@ -11,6 +11,8 @@ import (
 
 	"math/rand"
 
+	"io"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	. "github.com/claudetech/loggo/default"
@@ -242,7 +244,7 @@ func (o *Object) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Ope
 	id := fmt.Sprintf("%v:%v", o.object.ObjectID, rand.Int63n(10000))
 	Log.Tracef("Opening stream %v", id)
 
-	buffer, err := NewBuffer(o.client, o.object)
+	buffer, err := NewBuffer(o.client, o.client.cache, o.object)
 	if nil != err {
 		Log.Warningf("%v", err)
 		return nil, fuse.EIO
@@ -267,11 +269,13 @@ func (s *ReadStream) Release(ctx context.Context, req *fuse.ReleaseRequest) erro
 // Read reads some bytes or the whole file
 func (s *ReadStream) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
 	bytes, err := s.buffer.Read(req.Offset, int64(req.Size))
-	if nil != err {
+	if nil != err && io.EOF != err {
 		Log.Warningf("%v", err)
 		return fuse.EIO
 	}
 
-	resp.Data = bytes[:]
+	if io.EOF != err {
+		resp.Data = bytes[:]
+	}
 	return nil
 }

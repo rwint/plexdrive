@@ -277,7 +277,6 @@ func (d *Drive) Open(object *APIObject, offset int64) (io.ReadCloser, error) {
 		Log.Debugf("%v", err)
 		return nil, fmt.Errorf("Could not request object %v (%v) from API", object.ObjectID, object.Name)
 	}
-	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		// if res.StatusCode != 403 {

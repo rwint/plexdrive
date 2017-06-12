@@ -47,6 +47,15 @@ type APIObject struct {
 	CanTrash     bool
 }
 
+// Chunk is a playback chunk
+type Chunk struct {
+	ID       string `bson:"_id,omitempty"`
+	ObjectID string
+	Offset   int64
+	Size     int64
+	Bytes    []byte
+}
+
 // PageToken is the last change id
 type PageToken struct {
 	ID    string `bson:"_id,omitempty"`
@@ -81,6 +90,11 @@ func NewCache(mongoURL, mongoUser, mongoPass, mongoDatabase, cacheBasePath strin
 	col := db.C("api_objects")
 	col.EnsureIndex(mgo.Index{Key: []string{"parents"}})
 	col.EnsureIndex(mgo.Index{Key: []string{"name"}})
+
+	// delete old chunks
+	if err := cache.ClearChunks(); nil != err {
+		Log.Warningf("%v", err)
+	}
 
 	return &cache, nil
 }
@@ -216,4 +230,39 @@ func (c *Cache) GetStartPageToken() (string, error) {
 
 	Log.Tracef("Got start page token %v", pageToken.Token)
 	return pageToken.Token, nil
+}
+
+// StoreChunk stores a chunk in the cache
+func (c *Cache) StoreChunk(chunk *Chunk) error {
+	db := c.session.DB(c.dbName).C("chunks")
+
+	if _, err := db.Upsert(bson.M{"_id": chunk.ID}, &chunk); nil != err {
+		Log.Debugf("%v", err)
+		return fmt.Errorf("Could not store chunk %v", chunk.ID)
+	}
+
+	return nil
+}
+
+// LoadChunk loads a chunk from the cache
+func (c *Cache) LoadChunk(id string) (*Chunk, error) {
+	db := c.session.DB(c.dbName).C("chunks")
+
+	var chunk Chunk
+	if err := db.Find(bson.M{"_id": id}).One(&chunk); nil != err {
+		return nil, fmt.Errorf("Could not get chunk %v from cache", id)
+	}
+
+	return &chunk, nil
+}
+
+// ClearChunks removes all chunks
+func (c *Cache) ClearChunks() error {
+	db := c.session.DB(c.dbName).C("chunks")
+
+	if _, err := db.RemoveAll(bson.M{}); nil != err {
+		return fmt.Errorf("Could not delete chunks")
+	}
+
+	return nil
 }
